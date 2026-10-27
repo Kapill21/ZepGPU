@@ -1,0 +1,151 @@
+"""WireGuard configuration file generator."""
+
+from __future__ import annotations
+
+import ipaddress
+import os
+from pathlib import Path
+
+
+class WireGuardConfigGenerator:
+    """Generate WireGuard .conf file content."""
+
+    def __init__(
+        self,
+        vpn_ip: str,
+        private_key: str,
+        listen_port: int = 51820,
+        dns: str = "1.1.1.1,8.8.8.8",
+        mtu: int = 1420,
+    ):
+        self.vpn_ip = vpn_ip
+        self.private_key = private_key
+        self.listen_port = listen_port
+        self.dns = dns
+        self.mtu = mtu
+        self._peers: list[dict] = []
+
+    def add_peer(
+        self,
+        public_key: str,
+        *,
+        allowed_ips: str,
+        endpoint: str | None = None,
+        persistent_keepalive: int = 25,
+    ) -> WireGuardConfigGenerator:
+        """Append a peer. ``allowed_ips`` is required so callers never inherit a hidden CIDR."""
+        self._peers.append(
+            {
+                "public_key": public_key,
+                "endpoint": endpoint,
+                "allowed_ips": allowed_ips,
+                "persistent_keepalive": persistent_keepalive,
+            }
+        )
+        return self
+
+    def generate(self) -> str:
+        lines = ["[Interface]"]
+        lines.append(f"PrivateKey = {self.private_key}")
+        lines.append(f"Address = {self.vpn_ip}/24")
+        lines.append(f"ListenPort = {self.listen_port}")
+        lines.append(f"DNS = {self.dns}")
+        lines.append(f"MTU = {self.mtu}")
+        lines.append("")
+
+        for peer in self._peers:
+            lines.append("[Peer]")
+            lines.append(f"PublicKey = {peer['public_key']}")
+            if peer["endpoint"]:
+                lines.append(f"Endpoint = {peer['endpoint']}")
+            lines.append(f"AllowedIPs = {peer['allowed_ips']}")
+            if peer["persistent_keepalive"] > 0:
+                lines.append(f"PersistentKeepalive = {peer['persistent_keepalive']}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def save(self, path: str | Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)
+        path.write_text(self.generate())
+        os.chmod(path, 0o600)
+
+
+def allocate_vpn_ip(cidr: str = "10.8.0.0/24", used_ips: set[str] | None = None) -> str:
+    """Allocate the next available VPN IP in the CIDR range."""
+    used = used_ips or set()
+    net = ipaddress.ip_network(cidr)
+
+    reserved = {str(net.network_address), str(net.broadcast_address)}
+    for host in net.hosts():
+        ip = str(host)
+        if ip not in used and ip not in reserved:
+            return ip
+
+    raise RuntimeError(f"No available IPs in {cidr}")
+
+
+def allowed_ips_for_cidr(cidr: str = "10.8.0.0/24") -> str:
+    """Room-CIDR AllowedIPs (never full-tunnel 0.0.0.0/0)."""
+
+    network = ipaddress.ip_network(cidr, strict=False)
+    return str(network)
+
+
+def hub_endpoint_configured(*, relay_host: str | None, listen_port: int | None) -> bool:
+    host = str(relay_host or "").strip()
+    if not host or host in {"localhost", "127.0.0.1", "::1"}:
+        return False
+    return int(listen_port or 0) > 0
+
+
+def generate_relay_config(
+    vpn_ip: str,
+    private_key: str,
+    listen_port: int = 51820,
+    *,
+    peers: list[tuple[str, str | None]] | None = None,
+    allowed_ips: str | None = None,
+) -> str:
+    """Generate a hub WireGuard config including live peers (regen on join/revoke)."""
+    cidr_ips = allowed_ips or "10.8.0.0/24"
+    gen = WireGuardConfigGenerator(
+        vpn_ip=vpn_ip,
+        private_key=private_key,
+        listen_port=listen_port,
+    )
+    for public_key, peer_ip in peers or []:
+        gen.add_peer(
+            public_key=public_key,
+            endpoint=None,
+            allowed_ips=peer_ip or cidr_ips,
+            persistent_keepalive=0,
+        )
+    return gen.generate()
+
+
+def generate_peer_config(
+    vpn_ip: str,
+    private_key: str,
+    relay_public_key: str,
+    relay_endpoint: str,
+    dns: str = "1.1.1.1,8.8.8.8",
+    *,
+    allowed_ips: str | None = None,
+) -> str:
+    """Generate a peer WireGuard config pointing to the relay."""
+    gen = WireGuardConfigGenerator(
+        vpn_ip=vpn_ip,
+        private_key=private_key,
+        listen_port=0,
+        dns=dns,
+    )
+    gen.add_peer(
+        public_key=relay_public_key,
+        endpoint=relay_endpoint,
+        allowed_ips=allowed_ips or "10.8.0.0/24",
+        persistent_keepalive=25,
+    )
+    return gen.generate()

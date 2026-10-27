@@ -1,0 +1,163 @@
+"""Pydantic schemas for VPN API requests and responses."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from deepiri_zepgpu.vpn.peer_protocol import ExecuteTaskMessage, TaskResultMessage
+
+
+class PeerBase(BaseModel):
+    wireguard_public_key: str
+    endpoint: str | None = None
+    is_gpu_host: bool = False
+
+
+class PeerRegisterRequest(PeerBase):
+    vpn_network_id: str
+    is_relay: bool = False
+
+
+class GpuStatusPayload(BaseModel):
+    device_index: int
+    name: str | None = None
+    total_memory_mb: int
+    available_memory_mb: int
+    compute_capability: str | None = None
+    gpu_type: str = "nvidia"
+    state: str = "idle"
+    utilization_percent: float | None = None
+
+
+class PeerHeartbeatRequest(BaseModel):
+    peer_id: str
+    gpu_status: list[GpuStatusPayload] = Field(default_factory=list)
+    is_online: bool = True
+    endpoint: str | None = None
+
+
+class PeerResponse(BaseModel):
+    id: str
+    user_id: str
+    username: str
+    vpn_ip: str
+    online_status: str
+    is_gpu_host: bool
+    is_online: bool
+    last_seen: datetime
+    gpu_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GpuShareResponse(BaseModel):
+    id: str
+    peer_id: str
+    username: str
+    device_index: int
+    name: str | None
+    total_memory_mb: int
+    available_memory_mb: int
+    compute_capability: str | None
+    gpu_type: str
+    state: str
+    utilization_percent: float | None
+    is_active: bool
+    last_updated: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GpuPoolSummary(BaseModel):
+    total_gpus: int
+    total_memory_mb: int
+    available_memory_mb: int
+    online_peers: int
+    online_gpu_hosts: int
+    gpu_breakdown: list[GpuShareResponse]
+
+
+class VpnNetworkCreate(BaseModel):
+    name: str
+    cidr: str = "10.8.0.0/24"
+    listen_port: int = 51820
+    relay_endpoint: str | None = None
+
+
+class VpnNetworkResponse(BaseModel):
+    id: str
+    name: str
+    cidr: str
+    listen_port: int
+    relay_endpoint: str | None
+    is_active: bool
+    peer_count: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VpnConfigResponse(BaseModel):
+    config_text: str
+    vpn_ip: str
+    peer_id: str
+    auth_token: str
+
+
+class NetworkInviteRequest(BaseModel):
+    """Body for POST /vpn/networks/{id}/invite (network id is in the path)."""
+
+    max_uses: int = 1
+    expires_in_days: int = 7
+
+
+class InviteResponse(BaseModel):
+    id: str
+    code: str
+    vpn_network_id: str
+    vpn_network_name: str
+    max_uses: int
+    used_count: int
+    expires_at: datetime | None
+    is_revoked: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class JoinNetworkRequest(BaseModel):
+    invite_code: str
+    wireguard_public_key: str | None = None
+    is_gpu_host: bool = False
+
+
+class FriendRequest(BaseModel):
+    friend_id: str
+
+
+class FriendResponse(BaseModel):
+    id: str
+    user_id: str
+    username: str
+    email: str
+    status: str
+    created_at: datetime
+    accepted_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FriendListResponse(BaseModel):
+    friends: list[FriendResponse]
+    pending: list[FriendResponse]
+    sent_requests: list[FriendResponse]
+
+
+class TaskExecutionRequest(ExecuteTaskMessage):
+    """Compatibility name for the safe versioned peer request schema."""
+
+
+class TaskExecutionResponse(TaskResultMessage):
+    """Compatibility name for the safe primitive peer result schema."""

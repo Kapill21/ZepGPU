@@ -1,0 +1,212 @@
+services:
+  zepgpu:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: zepgpu:latest
+    container_name: zepgpu
+    environment:
+      - ZEPGPU_REDIS_URL=redis://redis:6379
+      - ZEPGPU_POSTGRES_URL=postgresql://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - DATABASE_URL=postgresql+asyncpg://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - DATABASE_SYNC_URL=postgresql://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - ZEPGPU_API_PORT=8000
+      - ZEPGPU_WS_PORT=8765
+    ports:
+      - "8000:8000"
+      - "8765:8765"
+    networks:
+      default:
+        aliases:
+          - api
+    volumes:
+      - zepgpu-data:/root/.zepgpu
+      - zepgpu-models:/root/.cache/zepgpu/models
+    depends_on:
+      - redis
+      - zepgpu-db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  zepgpu-ui:
+    build:
+      context: ../zepgpu-ui
+      dockerfile: Dockerfile
+    image: zepgpu-ui:latest
+    container_name: zepgpu-ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - zepgpu
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+  celery-beat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: zepgpu:latest
+    container_name: celery-beat
+    command: celery -A deepiri_zepgpu.queue.celery_app beat --loglevel=info
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_BEAT_SCHEDULE_DB=redis://redis:6379/3
+      - ZEPGPU_REDIS_URL=redis://redis:6379
+      - ZEPGPU_POSTGRES_URL=postgresql://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - DATABASE_URL=postgresql+asyncpg://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - DATABASE_SYNC_URL=postgresql://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+    depends_on:
+      - redis
+      - zepgpu-db
+    restart: unless-stopped
+
+  celery-worker-schedules:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: zepgpu:latest
+    container_name: celery-worker-schedules
+    command: celery -A deepiri_zepgpu.queue.celery_app worker --loglevel=info --queues=schedules,celery
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_BEAT_SCHEDULE_DB=redis://redis:6379/3
+      - ZEPGPU_REDIS_URL=redis://redis:6379
+      - ZEPGPU_POSTGRES_URL=postgresql://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - DATABASE_URL=postgresql+asyncpg://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - DATABASE_SYNC_URL=postgresql://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+    depends_on:
+      - redis
+      - zepgpu-db
+    restart: unless-stopped
+
+  celery-worker-gang:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: zepgpu:latest
+    container_name: celery-worker-gang
+    command: celery -A deepiri_zepgpu.queue.celery_app worker --loglevel=info --queues=gang
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_BEAT_SCHEDULE_DB=redis://redis:6379/3
+      - ZEPGPU_REDIS_URL=redis://redis:6379
+      - ZEPGPU_POSTGRES_URL=postgresql://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - DATABASE_URL=postgresql+asyncpg://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - DATABASE_SYNC_URL=postgresql://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - CUDA_VISIBLE_DEVICES=0,1
+    depends_on:
+      - redis
+      - zepgpu-db
+    restart: unless-stopped
+
+  celery-worker-preemption:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: zepgpu:latest
+    container_name: celery-worker-preemption
+    command: celery -A deepiri_zepgpu.queue.celery_app worker --loglevel=info --queues=preemption
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_BEAT_SCHEDULE_DB=redis://redis:6379/3
+      - ZEPGPU_REDIS_URL=redis://redis:6379
+      - ZEPGPU_POSTGRES_URL=postgresql://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - DATABASE_URL=postgresql+asyncpg://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+      - DATABASE_SYNC_URL=postgresql://zepgpu:zepgpu@zepgpu-db:5432/zepgpu
+    depends_on:
+      - redis
+      - zepgpu-db
+    restart: unless-stopped
+
+  zepgpu-db:
+    image: postgres:15-alpine
+    container_name: zepgpu-db
+    environment:
+      - POSTGRES_USER=zepgpu
+      - POSTGRES_PASSWORD=zepgpu
+      - POSTGRES_DB=zepgpu
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  wireguard-hub:
+    profiles: ["wireguard"]
+    image: linuxserver/wireguard:latest
+    container_name: zepgpu-wireguard-hub
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - wireguard-hub-config:/config
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - "51820:51820/udp"
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+    devices:
+      - /dev/net/tun:/dev/net/tun
+
+volumes:
+  zepgpu-data:
+  zepgpu-models:
+  redis-data:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+  wireguard-hub-config:

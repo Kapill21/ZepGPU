@@ -1,0 +1,162 @@
+"""Task definitions and status tracking."""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any
+
+
+class TaskStatus(Enum):
+    """Task execution status."""
+
+    PENDING = "pending"
+    QUEUED = "queued"
+    SCHEDULED = "scheduled"
+    ASSIGNED = "assigned"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    TIMEOUT = "timeout"
+
+
+class TaskPriority(Enum):
+    """Task priority levels."""
+
+    LOW = 1
+    NORMAL = 2
+    HIGH = 3
+    URGENT = 4
+    CRITICAL = 5
+
+
+@dataclass
+class TaskResources:
+    """GPU/CPU resource requirements for a task."""
+
+    gpu_memory_mb: int = 1024
+    cpu_cores: int = 1
+    timeout_seconds: int = 3600
+    gpu_type: str | None = None
+    allow_fallback_cpu: bool = True
+    container_memory_mb: int = 1024
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.container_memory_mb, bool)
+            or not isinstance(self.container_memory_mb, int)
+            or not 64 <= self.container_memory_mb <= 262_144
+        ):
+            raise ValueError("container_memory_mb must be an integer between 64 and 262144")
+
+
+@dataclass
+class Task:
+    """Represents a GPU compute task."""
+
+    func: Callable[..., Any]
+    args: tuple[Any, ...] = field(default_factory=tuple)
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    resources: TaskResources = field(default_factory=TaskResources)
+    priority: TaskPriority = TaskPriority.NORMAL
+    user_id: str | None = None
+    task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    name: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    status: TaskStatus = TaskStatus.PENDING
+    result: Any | None = None
+    error: str | None = None
+    traceback: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    gpu_device_id: int | None = None
+    remote_peer_vpn_ip: str | None = None
+    remote_gpu_share_id: str | None = None
+    room_id: str | None = None
+    dispatch_mode: str = "local"
+    target_peer_id: str | None = None
+    target_gpu_share_id: str | None = None
+    container_id: str | None = None
+    callback_url: str | None = None
+    tags: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.name is None:
+            self.name = f"task_{self.task_id[:8]}"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert task to dictionary representation."""
+        return {
+            "task_id": self.task_id,
+            "name": self.name,
+            "user_id": self.user_id,
+            "status": self.status.value,
+            "priority": self.priority.name,
+            "resources": {
+                "gpu_memory_mb": self.resources.gpu_memory_mb,
+                "cpu_cores": self.resources.cpu_cores,
+                "timeout_seconds": self.resources.timeout_seconds,
+                "gpu_type": self.resources.gpu_type,
+                "allow_fallback_cpu": self.resources.allow_fallback_cpu,
+                "container_memory_mb": self.resources.container_memory_mb,
+            },
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "gpu_device_id": self.gpu_device_id,
+            "error": self.error,
+            "tags": self.tags,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Task:
+        """Create task from dictionary representation."""
+        resources = TaskResources(**data.get("resources", {}))
+        return cls(
+            func=lambda: None,
+            task_id=data.get("task_id", str(uuid.uuid4())),
+            name=data.get("name"),
+            user_id=data.get("user_id"),
+            status=TaskStatus(data.get("status", "pending")),
+            priority=TaskPriority[data.get("priority", "NORMAL")],
+            resources=resources,
+            metadata=data.get("metadata", {}),
+            created_at=(
+                datetime.fromisoformat(data["created_at"])
+                if data.get("created_at")
+                else datetime.now(UTC)
+            ),
+            gpu_device_id=data.get("gpu_device_id"),
+            tags=data.get("tags", []),
+        )
+
+
+@dataclass
+class TaskResult:
+    """Result from a completed task."""
+
+    task_id: str
+    status: TaskStatus
+    result: Any | None = None
+    error: str | None = None
+    execution_time_seconds: float = 0.0
+    gpu_memory_used_mb: float = 0.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert result to dictionary representation."""
+        return {
+            "task_id": self.task_id,
+            "status": self.status.value,
+            "result": self.result,
+            "error": self.error,
+            "execution_time_seconds": self.execution_time_seconds,
+            "gpu_memory_used_mb": self.gpu_memory_used_mb,
+            "metadata": self.metadata,
+        }
