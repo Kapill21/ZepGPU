@@ -1,3 +1,12 @@
+> **Personal project archive**
+>
+> This repository contains a source-code snapshot of ZepGPU, a distributed GPU computing project originally developed by the Deepiri team. It is maintained here for technical reference and to document my development experience.
+>
+> This copy does not contain the original repository's commit history or pull requests. The original project's attribution and licensing are retained.
+>
+> **Individual contributions:** My specific contributions to the original project will be documented here separately from the broader team's work.
+
+
 # ZepGPU - Serverless GPU Framework
 
 _Made by Deepiri_
@@ -7,7 +16,7 @@ _Made by Deepiri_
 ![ZepGPU](https://img.shields.io/badge/ZepGPU-v0.1.0-blue)
 ![Python](https://img.shields.io/badge/Python-3.11+-green)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109-orange)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
 **Serverless GPU framework for kernel-as-a-service computing**
 
@@ -46,8 +55,8 @@ Poetry and a local Python install are only required if you want to run the backe
 ### Start the stack
 
 ```bash
-git clone https://github.com/Team-Deepiri/deepiri-zepgpu.git
-cd deepiri-zepgpu
+git clone https://github.com/Kapill21/ZepGPU.git
+cd ZepGPU
 
 docker compose -f docker/docker-compose.yml up -d --build
 ```
